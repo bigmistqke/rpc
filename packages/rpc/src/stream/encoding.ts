@@ -351,10 +351,10 @@ export function createStreamCodec(config: Array<Codec>, fallback: PrimitiveCodec
 }
 
 // helper to concatenate Uint8Arrays
-function concat(...arrays: Array<Uint8Array>): Uint8Array {
+function concat(...arrays: Array<Uint8Array>): Uint8Array<ArrayBuffer> {
   const result = new Uint8Array(new ArrayBuffer(arrays.reduce((a, b) => a + b.length, 0)))
   let index = 0
-  return arrays.reduce<Uint8Array>((result, current) => {
+  return arrays.reduce<Uint8Array<ArrayBuffer>>((result, current) => {
     result.set(current, index)
     index += current.length
     return result

@@ -107,10 +107,10 @@ describe('GeneratorCodec', () => {
           yield encoder.encode(item)
         }
       },
-      decode: async function* () {
+      decode: async function* (): AsyncGenerator<AsyncGenerator<string>, unknown, Uint8Array> {
         let buffer: Uint8Array
         while (true) {
-          buffer = yield decoder.decode(buffer!)
+          buffer = yield decoder.decode(buffer!) as any
         }
       },
     })
@@ -304,11 +304,11 @@ describe('createStreamCodec', () => {
             yield encoder.encode(JSON.stringify(item))
           }
         },
-        decode: async function* () {
+        decode: async function* (): AsyncGenerator<AsyncIterable<any>, unknown, Uint8Array> {
           const items: any[] = []
           try {
             while (true) {
-              const chunk: Uint8Array = yield items
+              const chunk: Uint8Array = yield items as any
               items.push(JSON.parse(decoder.decode(chunk)))
             }
           } finally {

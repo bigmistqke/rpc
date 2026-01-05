@@ -64,13 +64,13 @@ describe('createResponder', () => {
       [$MESSENGER_REQUEST]: 1,
       payload: { test: 'data' },
     })
-    // Worker-style postMessage is called with (message, transferables) - transferables is undefined
+    // Worker-style postMessage is called with (message, transferables)
     expect(port.postMessage).toHaveBeenCalledWith(
       {
         [$MESSENGER_RESPONSE]: 1,
         payload: 'result',
       },
-      undefined,
+      [],
     )
   })
 
@@ -145,7 +145,7 @@ describe('expose', () => {
         [$MESSENGER_RESPONSE]: 1,
         payload: 'Hello, World!',
       },
-      undefined,
+      [],
     )
   })
 
@@ -177,7 +177,7 @@ describe('expose', () => {
         [$MESSENGER_RESPONSE]: 1,
         payload: 'John Doe',
       },
-      undefined,
+      [],
     )
   })
 
@@ -288,7 +288,7 @@ describe('Window vs Worker handling', () => {
 
     expose({ test: () => 'ok' }, { to: windowLike as any })
 
-    windowLike.addEventListener.mock.calls[0][1]({
+    windowLike.addEventListener.mock.calls[0]![1]({
       data: {
         [$MESSENGER_REQUEST]: 1,
         payload: {
@@ -305,7 +305,7 @@ describe('Window vs Worker handling', () => {
     expect(windowLike.postMessage).toHaveBeenCalledWith(
       expect.any(Object),
       '*',
-      undefined,
+      [],
     )
   })
 
@@ -326,6 +326,6 @@ describe('Window vs Worker handling', () => {
     await flushPromises()
 
     // Worker-style postMessage is called with (message, transferables)
-    expect(workerLike.postMessage).toHaveBeenCalledWith(expect.any(Object), undefined)
+    expect(workerLike.postMessage).toHaveBeenCalledWith(expect.any(Object), [])
   })
 })

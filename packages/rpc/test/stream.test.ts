@@ -219,8 +219,8 @@ describe('rpc', () => {
       },
     }
 
-    const endpoint1 = rpc<typeof methods>(stream1, methods)
-    const endpoint2 = rpc<{}, typeof methods>(stream2, {})
+    const endpoint1 = rpc<{}, typeof methods>(stream1, methods)
+    const endpoint2 = rpc<typeof methods, {}>(stream2, {})
 
     // Wire up the streams
     const reader1 = endpoint1.stream.getReader()
@@ -316,7 +316,7 @@ describe('client', () => {
 
     await new Promise(resolve => setTimeout(resolve, 10))
 
-    const fetchCall = vi.mocked(globalThis.fetch).mock.calls[0]
+    const fetchCall = vi.mocked(globalThis.fetch).mock.calls[0]!
     expect(fetchCall[1]?.body).toBeInstanceOf(ReadableStream)
   })
 })

@@ -219,7 +219,7 @@ describe('rpc', () => {
     const proxy = rpc<{ user: { profile: { get: () => string } } }>('http://api.example.com')
     await proxy.user.profile.get()
 
-    const calledRequest = vi.mocked(globalThis.fetch).mock.calls[0][0] as Request
+    const calledRequest = vi.mocked(globalThis.fetch).mock.calls[0]![0] as Request
     expect(calledRequest.url).toBe('http://api.example.com/user/profile/get')
   })
 
@@ -231,7 +231,7 @@ describe('rpc', () => {
     const proxy = rpc<{ test: () => void }>('http://api.example.com')
     await proxy.test()
 
-    const calledRequest = vi.mocked(globalThis.fetch).mock.calls[0][0] as Request
+    const calledRequest = vi.mocked(globalThis.fetch).mock.calls[0]![0] as Request
     expect(calledRequest.headers.get('RPC_RR_PROXY')).toBe('true')
   })
 
@@ -243,7 +243,7 @@ describe('rpc', () => {
     const proxy = rpc<{ add: (a: number, b: number) => number }>('http://api.example.com')
     await proxy.add(1, 2)
 
-    const calledRequest = vi.mocked(globalThis.fetch).mock.calls[0][0] as Request
+    const calledRequest = vi.mocked(globalThis.fetch).mock.calls[0]![0] as Request
     const body = await calledRequest.json()
     expect(body).toEqual({ topics: ['add'], args: [1, 2] })
   })
