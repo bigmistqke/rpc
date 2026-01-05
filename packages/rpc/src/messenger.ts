@@ -10,7 +10,56 @@ import {
 import { RPC } from './types'
 import { callMethod, createCommander, createIdRegistry, defer } from './utils'
 
-export const $TRANSFER = 'WORKER-TRANSFER'
+export const $TRANSFER = 'RPC-TRANSFER'
+export const $MESSENGER = Symbol('RPC-MESSENGER')
+
+/** Wrapper type for transferable values */
+export type Transferred<T> = T & {
+  [$TRANSFER]: true
+}
+
+/**
+ * Mark a value as transferable for postMessage.
+ * Use this to transfer ownership of ArrayBuffer, ReadableStream, etc.
+ */
+export function transfer<T extends object>(value: T): Transferred<T> {
+  return Object.assign(value, { [$TRANSFER]: true } as const)
+}
+
+/**
+ * Check if a value is marked for transfer
+ */
+function isTransferred(value: unknown): value is Transferred<unknown> {
+  return !!value && typeof value === 'object' && $TRANSFER in value
+}
+
+/**
+ * Extract transferables from args and unwrap transferred values
+ */
+function extractTransferables(args: any[]): { args: any[]; transferables: Transferable[] } {
+  const transferables: Transferable[] = []
+
+  const processValue = (value: any): any => {
+    if (isTransferred(value)) {
+      transferables.push(value)
+      return value
+    }
+    if (Array.isArray(value)) {
+      return value.map(processValue)
+    }
+    if (value && typeof value === 'object' && value.constructor === Object) {
+      const result: any = {}
+      for (const key in value) {
+        result[key] = processValue(value[key])
+      }
+      return result
+    }
+    return value
+  }
+
+  const processedArgs = args.map(processValue)
+  return { args: processedArgs, transferables }
+}
 
 interface WorkerMessenger {
   postMessage(message: any, transferables?: any[]): void
@@ -115,7 +164,9 @@ export function createResponder(
       if (RequestShape.validate(data)) {
         try {
           const result = await callback(data)
-          postMessage(ResponseShape.create(data, result))
+          // Extract transferables from the result
+          const { args: [processedResult], transferables } = extractTransferables([result])
+          postMessage(ResponseShape.create(data, processedResult), transferables)
         } catch (error) {
           postMessage(ErrorShape.create(data, error))
         }
@@ -167,11 +218,59 @@ export function expose<T extends object>(
  * @param messenger - The Messenger to communicate with (e.g. Worker or Window)
  * @param options - Optional abort signal
  * @returns A proxy object that lets you call methods remotely
+ *
+ * @example
+ * ```ts
+ * const worker = new Worker('worker.js')
+ * const api = rpc<WorkerAPI>(worker)
+ *
+ * // Call remote methods
+ * await api.doSomething()
+ *
+ * // Access underlying messenger
+ * api[$MESSENGER].terminate()
+ * ```
  */
+// Overloads for specific messenger types to enable proper type inference
 export function rpc<T extends object>(
-  messenger: Messenger,
+  messenger: Worker,
   options?: { signal?: AbortSignal },
-): RPC<T> {
+): RPC<T> & { [$MESSENGER]: Worker }
+
+export function rpc<T extends object>(
+  messenger: MessagePort,
+  options?: { signal?: AbortSignal },
+): RPC<T> & { [$MESSENGER]: MessagePort }
+
+export function rpc<T extends object>(
+  messenger: Window,
+  options?: { signal?: AbortSignal },
+): RPC<T> & { [$MESSENGER]: Window }
+
+export function rpc<T extends object>(
+  messenger: BroadcastChannel,
+  options?: { signal?: AbortSignal },
+): RPC<T> & { [$MESSENGER]: BroadcastChannel }
+
+export function rpc<T extends object>(
+  messenger: ServiceWorker,
+  options?: { signal?: AbortSignal },
+): RPC<T> & { [$MESSENGER]: ServiceWorker }
+
+export function rpc<T extends object, M extends Messenger = Messenger>(
+  messenger: M,
+  options?: { signal?: AbortSignal },
+): RPC<T> & { [$MESSENGER]: M }
+
+// Implementation
+export function rpc<T extends object, M extends Messenger>(
+  messenger: M,
+  options?: { signal?: AbortSignal },
+): RPC<T> & { [$MESSENGER]: M } {
   const request = createRequester(messenger, options)
-  return createCommander<RPC<T>>((topics, args) => request(RPCPayloadShape.create(topics, args)))
+  const proxy = createCommander<RPC<T>>((topics, args) => {
+    const { args: processedArgs, transferables } = extractTransferables(args)
+    return request(RPCPayloadShape.create(topics, processedArgs), transferables)
+  })
+  return Object.assign(proxy, { [$MESSENGER]: messenger })
 }

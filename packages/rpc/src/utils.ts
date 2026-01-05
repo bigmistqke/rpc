@@ -66,8 +66,8 @@ export function createCommander<T extends object = object>(
     apply: (topics: Array<string>, args: Array<any>) => void,
   ): T {
     return new Proxy(function () {} as T, {
-      get(_, topic) {
-        if (typeof topic === 'symbol') return undefined
+      get(target, topic) {
+        if (typeof topic === 'symbol') return (target as any)[topic]
         return _createCommander([...topics, topic], apply)
       },
       apply(_, __, args) {
