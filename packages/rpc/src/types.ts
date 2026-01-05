@@ -47,7 +47,7 @@ type FilterNoResponseMethod<T> = {
 /**********************************************************************************/
 
 export interface ResponseMethod<T extends Fn> {
-  (...args: Parameters<T>): Promise<ReturnType<T>>
+  (...args: Parameters<T>): Promise<Awaited<ReturnType<T>>>
 }
 
 export type ResponseRPCNode<T> = T extends Fn

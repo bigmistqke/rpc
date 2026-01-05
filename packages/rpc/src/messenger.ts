@@ -8,6 +8,7 @@ import {
   RPCPayloadShape,
 } from './message-protocol'
 import { RPC } from './types'
+export type { RPC } from './types'
 import { callMethod, createCommander, createIdRegistry, defer } from './utils'
 
 export const $TRANSFER = 'RPC-TRANSFER'
