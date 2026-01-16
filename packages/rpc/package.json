@@ -25,10 +25,10 @@
   },
   "scripts": {
     "build": "tsup",
-    "bump": "bumpp",
-    "prepublishOnly": "pnpm test && pnpm build",
     "test": "vitest run",
-    "types": "pnpm exec tsc --noEmit"
+    "types": "pnpm exec tsc --noEmit",
+    "bump": "bumpp",
+    "prepublishOnly": "pnpm test && pnpm build"
   },
   "license": "MIT",
   "devDependencies": {
