@@ -50,6 +50,9 @@ interface HandleMarker<T extends object> {
   methods: T
 }
 
+/** Type for values returned by handle() - unwrapped to RPC<T> by RPC system */
+export type Handled<T extends object> = T & { readonly ['__rpc_handled__']: T }
+
 /**
  * Mark methods to be returned as a sub-proxy from an RPC method.
  * Use this when a method needs to return an object with callable methods.
@@ -67,8 +70,8 @@ interface HandleMarker<T extends object> {
  * })
  * ```
  */
-export function handle<T extends object>(methods: T): T {
-  return { [$HANDLE_MARKER]: true, methods } as unknown as T
+export function handle<T extends object>(methods: T): Handled<T> {
+  return { [$HANDLE_MARKER]: true, methods } as unknown as Handled<T>
 }
 
 /**
@@ -296,8 +299,9 @@ export function expose<TMethods extends object>(
             const { topics, args } = data.payload
 
             // Check if this is a namespaced request (for handle() sub-proxies)
-            if (topics.length > 0 && topics[0].startsWith(HANDLE_NAMESPACE_PREFIX)) {
-              const namespaceId = topics[0]
+            const firstTopic = topics[0]
+            if (firstTopic && firstTopic.startsWith(HANDLE_NAMESPACE_PREFIX)) {
+              const namespaceId = firstTopic
               const handler = namespaceHandlers.get(namespaceId)
 
               if (!handler) {
