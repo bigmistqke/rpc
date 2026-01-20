@@ -1,11 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { expose, rpc, createResponder } from '../src/messenger'
+import { expose, rpc, createResponder, handle } from '../src/messenger'
 import {
   $MESSENGER_REQUEST,
   $MESSENGER_RESPONSE,
   $MESSENGER_ERROR,
   $MESSENGER_RPC_REQUEST,
-  $MESSENGER_INIT,
+  $MESSENGER_HANDLE,
 } from '../src/message-protocol'
 
 // Helper to flush pending promises
@@ -122,38 +122,17 @@ describe('createResponder', () => {
 })
 
 describe('expose', () => {
-  it('should handle init request and then RPC requests', async () => {
+  it('should handle RPC requests directly', async () => {
     const port = createMockMessagePort()
-    const factory = vi.fn(() => ({
-      greet: (name: string) => `Hello, ${name}!`,
-    }))
 
-    expose(factory, { to: port })
-
-    // First, send init request
-    port._emit({
-      [$MESSENGER_REQUEST]: 0,
-      payload: {
-        [$MESSENGER_INIT]: true,
-        args: [],
-      },
-    })
-
-    await flushPromises()
-
-    // Factory should have been called
-    expect(factory).toHaveBeenCalled()
-
-    // Init response should have been sent
-    expect(port.postMessage).toHaveBeenCalledWith(
+    expose(
       {
-        [$MESSENGER_RESPONSE]: 0,
-        payload: undefined,
+        greet: (name: string) => `Hello, ${name}!`,
       },
-      [],
+      { to: port },
     )
 
-    // Now send RPC request
+    // Send RPC request directly (no init needed)
     port._emit({
       [$MESSENGER_REQUEST]: 1,
       payload: {
@@ -174,76 +153,20 @@ describe('expose', () => {
     )
   })
 
-  it('should pass constructor args to factory', async () => {
-    const port = createMockMessagePort()
-    const factory = vi.fn((config: { prefix: string }) => ({
-      greet: (name: string) => `${config.prefix} ${name}!`,
-    }))
-
-    expose(factory, { to: port })
-
-    // Send init with args
-    port._emit({
-      [$MESSENGER_REQUEST]: 0,
-      payload: {
-        [$MESSENGER_INIT]: true,
-        args: [{ prefix: 'Welcome,' }],
-      },
-    })
-
-    await flushPromises()
-
-    expect(factory).toHaveBeenCalledWith({ prefix: 'Welcome,' })
-  })
-
-  it('should handle async factory', async () => {
-    const port = createMockMessagePort()
-    const factory = vi.fn(async () => {
-      await new Promise(resolve => setTimeout(resolve, 10))
-      return {
-        getValue: () => 42,
-      }
-    })
-
-    expose(factory, { to: port })
-
-    // Send init
-    port._emit({
-      [$MESSENGER_REQUEST]: 0,
-      payload: {
-        [$MESSENGER_INIT]: true,
-        args: [],
-      },
-    })
-
-    await flushPromises()
-    await new Promise(resolve => setTimeout(resolve, 20))
-
-    expect(factory).toHaveBeenCalled()
-  })
-
   it('should handle nested method calls', async () => {
     const port = createMockMessagePort()
 
     expose(
-      () => ({
+      {
         user: {
           profile: {
             getName: () => 'John Doe',
           },
         },
-      }),
+      },
       { to: port },
     )
 
-    // Init first
-    port._emit({
-      [$MESSENGER_REQUEST]: 0,
-      payload: { [$MESSENGER_INIT]: true, args: [] },
-    })
-    await flushPromises()
-
-    // Then call nested method
     port._emit({
       [$MESSENGER_REQUEST]: 1,
       payload: {
@@ -255,7 +178,7 @@ describe('expose', () => {
 
     await flushPromises()
 
-    expect(port.postMessage).toHaveBeenLastCalledWith(
+    expect(port.postMessage).toHaveBeenCalledWith(
       {
         [$MESSENGER_RESPONSE]: 1,
         payload: 'John Doe',
@@ -264,17 +187,144 @@ describe('expose', () => {
     )
   })
 
-  it('should error if RPC called before init', async () => {
+  it('should handle async methods', async () => {
     const port = createMockMessagePort()
 
-    expose(() => ({ test: vi.fn() }), { to: port })
+    expose(
+      {
+        asyncMethod: async () => {
+          await new Promise(resolve => setTimeout(resolve, 10))
+          return 'async result'
+        },
+      },
+      { to: port },
+    )
 
-    // Send RPC without init
     port._emit({
       [$MESSENGER_REQUEST]: 1,
       payload: {
         [$MESSENGER_RPC_REQUEST]: true,
-        topics: ['test'],
+        topics: ['asyncMethod'],
+        args: [],
+      },
+    })
+
+    await new Promise(resolve => setTimeout(resolve, 20))
+
+    expect(port.postMessage).toHaveBeenCalledWith(
+      {
+        [$MESSENGER_RESPONSE]: 1,
+        payload: 'async result',
+      },
+      [],
+    )
+  })
+
+  it('should return handle response when method returns handle()', async () => {
+    const port = createMockMessagePort()
+
+    expose(
+      {
+        init: () =>
+          handle({
+            getValue: () => 42,
+          }),
+      },
+      { to: port },
+    )
+
+    port._emit({
+      [$MESSENGER_REQUEST]: 1,
+      payload: {
+        [$MESSENGER_RPC_REQUEST]: true,
+        topics: ['init'],
+        args: [],
+      },
+    })
+
+    await flushPromises()
+
+    // Should return a handle response with namespace ID
+    expect(port.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        [$MESSENGER_RESPONSE]: 1,
+        payload: expect.objectContaining({
+          [$MESSENGER_HANDLE]: expect.stringContaining('__rpc_handle_'),
+        }),
+      }),
+      [],
+    )
+  })
+
+  it('should handle namespaced RPC calls from handle()', async () => {
+    const port = createMockMessagePort()
+    const getValue = vi.fn(() => 42)
+
+    expose(
+      {
+        init: () =>
+          handle({
+            getValue,
+          }),
+      },
+      { to: port },
+    )
+
+    // First call init to get namespace ID
+    port._emit({
+      [$MESSENGER_REQUEST]: 1,
+      payload: {
+        [$MESSENGER_RPC_REQUEST]: true,
+        topics: ['init'],
+        args: [],
+      },
+    })
+
+    await flushPromises()
+
+    // Extract namespace ID from response
+    const initResponse = port.postMessage.mock.calls[0][0]
+    const namespaceId = initResponse.payload[$MESSENGER_HANDLE]
+
+    // Now call method on the handle
+    port._emit({
+      [$MESSENGER_REQUEST]: 2,
+      payload: {
+        [$MESSENGER_RPC_REQUEST]: true,
+        topics: [namespaceId, 'getValue'],
+        args: [],
+      },
+    })
+
+    await flushPromises()
+
+    expect(getValue).toHaveBeenCalled()
+    expect(port.postMessage).toHaveBeenLastCalledWith(
+      {
+        [$MESSENGER_RESPONSE]: 2,
+        payload: 42,
+      },
+      [],
+    )
+  })
+
+  it('should handle errors in RPC methods', async () => {
+    const port = createMockMessagePort()
+
+    expose(
+      {
+        failingMethod: () => {
+          throw new Error('test error')
+        },
+      },
+      { to: port },
+    )
+
+    port._emit({
+      [$MESSENGER_REQUEST]: 1,
+      payload: {
+        [$MESSENGER_RPC_REQUEST]: true,
+        topics: ['failingMethod'],
         args: [],
       },
     })
@@ -291,48 +341,32 @@ describe('expose', () => {
 })
 
 describe('rpc', () => {
-  it('should create a proxy that sends RPC requests', async () => {
+  it('should create a synchronous proxy that sends RPC requests', async () => {
     const { port1, port2 } = createMockMessageChannel()
 
     // Set up responder on port2
-    expose(() => ({ add: (a: number, b: number) => a + b }), { to: port2 })
+    expose({ add: (a: number, b: number) => a + b }, { to: port2 })
 
-    // Create RPC proxy on port1 (now async)
-    const proxy = await rpc<{ add: (a: number, b: number) => number }>(port1)
+    // Create RPC proxy on port1 (now synchronous)
+    const proxy = rpc<{ add: (a: number, b: number) => number }>(port1)
 
     const result = await proxy.add(2, 3)
     expect(result).toBe(5)
-  })
-
-  it('should pass constructor args to worker', async () => {
-    const { port1, port2 } = createMockMessageChannel()
-
-    const factory = vi.fn((multiplier: number) => ({
-      multiply: (a: number) => a * multiplier,
-    }))
-
-    expose(factory, { to: port2 })
-
-    const proxy = await rpc<{ multiply: (a: number) => number }>(port1, [10])
-
-    const result = await proxy.multiply(5)
-    expect(result).toBe(50)
-    expect(factory).toHaveBeenCalledWith(10)
   })
 
   it('should handle nested method calls via proxy', async () => {
     const { port1, port2 } = createMockMessageChannel()
 
     expose(
-      () => ({
+      {
         math: {
           multiply: (a: number, b: number) => a * b,
         },
-      }),
+      },
       { to: port2 },
     )
 
-    const proxy = await rpc<{ math: { multiply: (a: number, b: number) => number } }>(port1)
+    const proxy = rpc<{ math: { multiply: (a: number, b: number) => number } }>(port1)
 
     const result = await proxy.math.multiply(4, 5)
     expect(result).toBe(20)
@@ -342,15 +376,15 @@ describe('rpc', () => {
     const { port1, port2 } = createMockMessageChannel()
 
     expose(
-      () => ({
+      {
         failingMethod: () => {
           throw new Error('Remote error')
         },
-      }),
+      },
       { to: port2 },
     )
 
-    const proxy = await rpc<{ failingMethod: () => void }>(port1)
+    const proxy = rpc<{ failingMethod: () => void }>(port1)
 
     await expect(proxy.failingMethod()).rejects.toThrow()
   })
@@ -359,16 +393,16 @@ describe('rpc', () => {
     const { port1, port2 } = createMockMessageChannel()
 
     expose(
-      () => ({
+      {
         delayed: async (ms: number, value: string) => {
           await new Promise(resolve => setTimeout(resolve, ms))
           return value
         },
-      }),
+      },
       { to: port2 },
     )
 
-    const proxy = await rpc<{ delayed: (ms: number, value: string) => Promise<string> }>(port1)
+    const proxy = rpc<{ delayed: (ms: number, value: string) => Promise<string> }>(port1)
 
     const [result1, result2, result3] = await Promise.all([
       proxy.delayed(30, 'first'),
@@ -380,6 +414,85 @@ describe('rpc', () => {
     expect(result2).toBe('second')
     expect(result3).toBe('third')
   })
+
+  it('should create sub-proxy when method returns handle()', async () => {
+    const { port1, port2 } = createMockMessageChannel()
+
+    expose(
+      {
+        init: (multiplier: number) =>
+          handle({
+            multiply: (a: number) => a * multiplier,
+          }),
+      },
+      { to: port2 },
+    )
+
+    const proxy = rpc<{
+      init: (multiplier: number) => { multiply: (a: number) => number }
+    }>(port1)
+
+    // Call init to get sub-proxy
+    const calculator = await proxy.init(10)
+
+    // Call method on sub-proxy
+    const result = await calculator.multiply(5)
+    expect(result).toBe(50)
+  })
+
+  it('should handle async methods that return handle()', async () => {
+    const { port1, port2 } = createMockMessageChannel()
+
+    expose(
+      {
+        asyncInit: async (config: { prefix: string }) => {
+          await new Promise(resolve => setTimeout(resolve, 10))
+          return handle({
+            greet: (name: string) => `${config.prefix} ${name}!`,
+          })
+        },
+      },
+      { to: port2 },
+    )
+
+    const proxy = rpc<{
+      asyncInit: (config: { prefix: string }) => Promise<{ greet: (name: string) => string }>
+    }>(port1)
+
+    const greeter = await proxy.asyncInit({ prefix: 'Hello,' })
+    const result = await greeter.greet('World')
+    expect(result).toBe('Hello, World!')
+  })
+
+  it('should handle nested handle() calls', async () => {
+    const { port1, port2 } = createMockMessageChannel()
+
+    expose(
+      {
+        createOuter: () =>
+          handle({
+            createInner: () =>
+              handle({
+                getValue: () => 'nested value',
+              }),
+          }),
+      },
+      { to: port2 },
+    )
+
+    const proxy = rpc<{
+      createOuter: () => {
+        createInner: () => {
+          getValue: () => string
+        }
+      }
+    }>(port1)
+
+    const outer = await proxy.createOuter()
+    const inner = await outer.createInner()
+    const result = await inner.getValue()
+    expect(result).toBe('nested value')
+  })
 })
 
 describe('Window vs Worker handling', () => {
@@ -390,17 +503,7 @@ describe('Window vs Worker handling', () => {
       closed: false,
     }
 
-    expose(() => ({ test: () => 'ok' }), { to: windowLike as any })
-
-    // Send init
-    windowLike.addEventListener.mock.calls[0]![1]({
-      data: {
-        [$MESSENGER_REQUEST]: 0,
-        payload: { [$MESSENGER_INIT]: true, args: [] },
-      },
-    } as MessageEvent)
-
-    await flushPromises()
+    expose({ test: () => 'ok' }, { to: windowLike as any })
 
     // Send RPC
     windowLike.addEventListener.mock.calls[0]![1]({
@@ -417,22 +520,14 @@ describe('Window vs Worker handling', () => {
     await flushPromises()
 
     // Window-style postMessage should include '*' as second argument
-    expect(windowLike.postMessage).toHaveBeenLastCalledWith(expect.any(Object), '*', [])
+    expect(windowLike.postMessage).toHaveBeenCalledWith(expect.any(Object), '*', [])
   })
 
   it('should not use targetOrigin for Worker-like objects', async () => {
     const workerLike = createMockMessagePort()
 
-    expose(() => ({ test: () => 'ok' }), { to: workerLike })
+    expose({ test: () => 'ok' }, { to: workerLike })
 
-    // Init first
-    workerLike._emit({
-      [$MESSENGER_REQUEST]: 0,
-      payload: { [$MESSENGER_INIT]: true, args: [] },
-    })
-    await flushPromises()
-
-    // Then RPC
     workerLike._emit({
       [$MESSENGER_REQUEST]: 1,
       payload: {
@@ -445,6 +540,6 @@ describe('Window vs Worker handling', () => {
     await flushPromises()
 
     // Worker-style postMessage is called with (message, transferables)
-    expect(workerLike.postMessage).toHaveBeenLastCalledWith(expect.any(Object), [])
+    expect(workerLike.postMessage).toHaveBeenCalledWith(expect.any(Object), [])
   })
 })

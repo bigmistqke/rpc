@@ -1,8 +1,9 @@
 import {
   $MESSENGER_ERROR,
+  $MESSENGER_HANDLE,
   $MESSENGER_RESPONSE,
   ErrorShape,
-  InitPayloadShape,
+  HandleResponseShape,
   RequestData,
   RequestShape,
   ResponseShape,
@@ -33,6 +34,48 @@ export function transfer<T extends object>(value: T): Transferred<T> {
  */
 function isTransferred(value: unknown): value is Transferred<unknown> {
   return !!value && typeof value === 'object' && $TRANSFER in value
+}
+
+/**********************************************************************************/
+/*                                                                                */
+/*                                     Handle                                     */
+/*                                                                                */
+/**********************************************************************************/
+
+const $HANDLE_MARKER = Symbol('RPC-HANDLE-MARKER')
+
+/** Internal marker type for handle() */
+interface HandleMarker<T extends object> {
+  [$HANDLE_MARKER]: true
+  methods: T
+}
+
+/**
+ * Mark methods to be returned as a sub-proxy from an RPC method.
+ * Use this when a method needs to return an object with callable methods.
+ *
+ * @example
+ * ```ts
+ * expose({
+ *   init(canvas: OffscreenCanvas) {
+ *     const renderer = createRenderer(canvas)
+ *     return handle({
+ *       render: () => renderer.render(),
+ *       resize: (w, h) => renderer.resize(w, h),
+ *     })
+ *   }
+ * })
+ * ```
+ */
+export function handle<T extends object>(methods: T): T {
+  return { [$HANDLE_MARKER]: true, methods } as unknown as T
+}
+
+/**
+ * Check if a value is a handle marker
+ */
+function isHandleMarker<T extends object>(value: unknown): value is HandleMarker<T> {
+  return !!value && typeof value === 'object' && $HANDLE_MARKER in value
 }
 
 /**
@@ -188,39 +231,58 @@ export function createResponder(
 /*                                                                                */
 /**********************************************************************************/
 
-/** Factory function that creates methods from constructor args */
-type MethodsFactory<TArgs extends any[], TMethods extends object> = (
-  ...args: TArgs
-) => TMethods | Promise<TMethods>
+// Prefix for namespace IDs to avoid collisions
+const HANDLE_NAMESPACE_PREFIX = '__rpc_handle_'
+
+// Counter for generating unique namespace IDs
+let handleNamespaceCounter = 0
 
 /**
  * Exposes methods as an RPC endpoint over the given messenger.
- * Accepts a factory function that receives constructor args and returns methods.
  *
- * @param factory - A function that takes constructor args and returns methods (can be async)
+ * @param methods - Object containing methods to expose
  * @param options - Optional target Messenger and abort signal
  *
  * @example
  * ```ts
- * // Worker side
- * expose(async (canvas: OffscreenCanvas, config: Config) => {
- *   await initializeWasm()
- *   const renderer = createRenderer(canvas, config)
+ * // Worker side - simple methods
+ * expose({
+ *   add: (a, b) => a + b,
+ *   multiply: (a, b) => a * b,
+ * })
  *
- *   return {
- *     render: renderer.render,
- *     resize: renderer.resize,
+ * // Worker side - with initialization returning sub-proxy
+ * expose({
+ *   init(canvas: OffscreenCanvas) {
+ *     const renderer = createRenderer(canvas)
+ *     return handle({
+ *       render: () => renderer.render(),
+ *       resize: (w, h) => renderer.resize(w, h),
+ *     })
  *   }
  * })
  * ```
  */
-export function expose<TArgs extends any[], TMethods extends object>(
-  factory: MethodsFactory<TArgs, TMethods>,
+export function expose<TMethods extends object>(
+  methods: TMethods,
   { to = self, signal }: { to?: Messenger; signal?: AbortSignal } = {},
 ): void {
   const postMessage = usePostMessage(to)
-  let methods: TMethods | null = null
-  let initPromise: Promise<TMethods> | null = null
+
+  // Registry of namespaced handlers (for handle() sub-proxies)
+  const namespaceHandlers = new Map<string, object>()
+
+  /**
+   * Process a result value, registering handle markers as namespaces
+   */
+  const processResult = (result: unknown): unknown => {
+    if (isHandleMarker(result)) {
+      const namespaceId = `${HANDLE_NAMESPACE_PREFIX}${handleNamespaceCounter++}`
+      namespaceHandlers.set(namespaceId, result.methods)
+      return HandleResponseShape.create(namespaceId)
+    }
+    return result
+  }
 
   to.addEventListener(
     'message',
@@ -229,32 +291,32 @@ export function expose<TArgs extends any[], TMethods extends object>(
 
       if (RequestShape.validate(data)) {
         try {
-          // Handle init request
-          if (InitPayloadShape.validate(data.payload)) {
-            const { args } = data.payload
-            // Call factory with constructor args
-            initPromise = Promise.resolve(factory(...(args as TArgs)))
-            methods = await initPromise
-            // Respond with success (no payload needed, just acknowledgment)
-            postMessage(ResponseShape.create(data, undefined), [])
-            return
-          }
-
           // Handle RPC request
           if (RPCPayloadShape.validate(data.payload)) {
-            // Wait for init if still in progress
-            if (initPromise && !methods) {
-              methods = await initPromise
-            }
-
-            if (!methods) {
-              throw new Error('RPC called before initialization')
-            }
-
             const { topics, args } = data.payload
+
+            // Check if this is a namespaced request (for handle() sub-proxies)
+            if (topics.length > 0 && topics[0].startsWith(HANDLE_NAMESPACE_PREFIX)) {
+              const namespaceId = topics[0]
+              const handler = namespaceHandlers.get(namespaceId)
+
+              if (!handler) {
+                throw new Error(`Unknown namespace: ${namespaceId}`)
+              }
+
+              // Call method on the namespaced handler (skip namespace ID in topics)
+              const result = await callMethod(handler, topics.slice(1), args)
+              const processedResult = processResult(result)
+              const { args: [finalResult], transferables } = extractTransferables([processedResult])
+              postMessage(ResponseShape.create(data, finalResult), transferables)
+              return
+            }
+
+            // Regular method call on root methods
             const result = await callMethod(methods, topics, args)
-            const { args: [processedResult], transferables } = extractTransferables([result])
-            postMessage(ResponseShape.create(data, processedResult), transferables)
+            const processedResult = processResult(result)
+            const { args: [finalResult], transferables } = extractTransferables([processedResult])
+            postMessage(ResponseShape.create(data, finalResult), transferables)
             return
           }
         } catch (error) {
@@ -272,83 +334,96 @@ export function expose<TArgs extends any[], TMethods extends object>(
 }
 
 /**
+ * Check if a response payload is a handle response
+ */
+function isHandleResponse(value: unknown): value is { [$MESSENGER_HANDLE]: string } {
+  return (
+    !!value &&
+    typeof value === 'object' &&
+    $MESSENGER_HANDLE in value &&
+    typeof (value as any)[$MESSENGER_HANDLE] === 'string'
+  )
+}
+
+/**
  * Creates an RPC proxy for calling remote methods on the given Messenger.
- * Sends constructor args to the worker and waits for initialization.
  *
  * @param messenger - The Messenger to communicate with (e.g. Worker or Window)
- * @param args - Constructor arguments to pass to the worker's factory function
  * @param options - Optional abort signal
- * @returns A promise that resolves to a proxy object for calling remote methods
+ * @returns A proxy object for calling remote methods
  *
  * @example
  * ```ts
- * const api = await rpc<RendererAPI>(
- *   new Worker('renderer.worker.js'),
- *   [transfer(offscreenCanvas), { width: 1920, height: 1080 }]
- * )
+ * // Create RPC proxy (synchronous)
+ * const worker = rpc<WorkerMethods>(new Worker('worker.js'))
  *
- * // Worker is fully initialized, safe to call methods
- * await api.render(frameData)
+ * // Call methods that return handle() get sub-proxies
+ * const renderer = await worker.init(transfer(canvas))
+ * await renderer.render()
  *
  * // Access underlying messenger
- * api[$MESSENGER].terminate()
+ * worker[$MESSENGER].terminate()
  * ```
  */
 // Overloads for specific messenger types to enable proper type inference
 export function rpc<T extends object>(
   messenger: Worker,
-  args?: any[],
   options?: { signal?: AbortSignal },
-): Promise<RPC<T> & { [$MESSENGER]: Worker }>
+): RPC<T> & { [$MESSENGER]: Worker }
 
 export function rpc<T extends object>(
   messenger: MessagePort,
-  args?: any[],
   options?: { signal?: AbortSignal },
-): Promise<RPC<T> & { [$MESSENGER]: MessagePort }>
+): RPC<T> & { [$MESSENGER]: MessagePort }
 
 export function rpc<T extends object>(
   messenger: Window,
-  args?: any[],
   options?: { signal?: AbortSignal },
-): Promise<RPC<T> & { [$MESSENGER]: Window }>
+): RPC<T> & { [$MESSENGER]: Window }
 
 export function rpc<T extends object>(
   messenger: BroadcastChannel,
-  args?: any[],
   options?: { signal?: AbortSignal },
-): Promise<RPC<T> & { [$MESSENGER]: BroadcastChannel }>
+): RPC<T> & { [$MESSENGER]: BroadcastChannel }
 
 export function rpc<T extends object>(
   messenger: ServiceWorker,
-  args?: any[],
   options?: { signal?: AbortSignal },
-): Promise<RPC<T> & { [$MESSENGER]: ServiceWorker }>
+): RPC<T> & { [$MESSENGER]: ServiceWorker }
 
 export function rpc<T extends object, M extends Messenger = Messenger>(
   messenger: M,
-  args?: any[],
   options?: { signal?: AbortSignal },
-): Promise<RPC<T> & { [$MESSENGER]: M }>
+): RPC<T> & { [$MESSENGER]: M }
 
 // Implementation
-export async function rpc<T extends object, M extends Messenger>(
+export function rpc<T extends object, M extends Messenger>(
   messenger: M,
-  args: any[] = [],
   options?: { signal?: AbortSignal },
-): Promise<RPC<T> & { [$MESSENGER]: M }> {
+): RPC<T> & { [$MESSENGER]: M } {
   const request = createRequester(messenger, options)
 
-  // Send init request with constructor args
-  const { args: processedArgs, transferables } = extractTransferables(args)
-  await request(InitPayloadShape.create(processedArgs), transferables)
+  /**
+   * Create a commander proxy that handles handle() responses
+   */
+  const createRpcCommander = <U extends object>(topicPrefix: string[] = []): RPC<U> => {
+    return createCommander<RPC<U>>((topics, methodArgs) => {
+      const { args: processedMethodArgs, transferables: methodTransferables } =
+        extractTransferables(methodArgs)
+      const fullTopics = [...topicPrefix, ...topics]
+      return request(RPCPayloadShape.create(fullTopics, processedMethodArgs), methodTransferables).then(
+        (result: unknown) => {
+          // If result is a handle response, create a sub-proxy
+          if (isHandleResponse(result)) {
+            return createRpcCommander(result[$MESSENGER_HANDLE] ? [result[$MESSENGER_HANDLE]] : [])
+          }
+          return result
+        },
+      )
+    })
+  }
 
-  // Create proxy for method calls
-  const proxy = createCommander<RPC<T>>((topics, methodArgs) => {
-    const { args: processedMethodArgs, transferables: methodTransferables } =
-      extractTransferables(methodArgs)
-    return request(RPCPayloadShape.create(topics, processedMethodArgs), methodTransferables)
-  })
+  const proxy = createRpcCommander<T>()
 
   return Object.assign(proxy, { [$MESSENGER]: messenger })
 }

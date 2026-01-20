@@ -56,13 +56,12 @@ export const RPCPayloadShape = createShape(
   (topics: Array<string>, args: Array<any>) => ({ [$MESSENGER_RPC_REQUEST]: true, topics, args }),
 )
 
-// Initialization request payload (for factory-based expose)
-export const $MESSENGER_INIT = 'RPC_PROXY_INIT'
+// Handle response - when a method returns handle(), client creates sub-proxy
+export const $MESSENGER_HANDLE = 'RPC_PROXY_HANDLE'
 
-export const InitPayloadShape = createShape(
+export const HandleResponseShape = createShape(
   v.object({
-    [$MESSENGER_INIT]: v.boolean(),
-    args: v.array(v.any()),
+    [$MESSENGER_HANDLE]: v.string(), // namespace ID
   }),
-  (args: Array<any>) => ({ [$MESSENGER_INIT]: true, args }),
+  (namespaceId: string) => ({ [$MESSENGER_HANDLE]: namespaceId }),
 )
