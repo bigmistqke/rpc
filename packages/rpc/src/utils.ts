@@ -68,6 +68,8 @@ export function createCommander<T extends object = object>(
     return new Proxy(function () {} as T, {
       get(target, topic) {
         if (typeof topic === 'symbol') return (target as any)[topic]
+        // Return undefined for 'then' so proxy isn't treated as thenable
+        if (topic === 'then') return undefined
         return _createCommander([...topics, topic], apply)
       },
       apply(_, __, args) {

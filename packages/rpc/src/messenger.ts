@@ -2,6 +2,7 @@ import {
   $MESSENGER_ERROR,
   $MESSENGER_RESPONSE,
   ErrorShape,
+  InitPayloadShape,
   RequestData,
   RequestShape,
   ResponseShape,
@@ -187,46 +188,107 @@ export function createResponder(
 /*                                                                                */
 /**********************************************************************************/
 
+/** Factory function that creates methods from constructor args */
+type MethodsFactory<TArgs extends any[], TMethods extends object> = (
+  ...args: TArgs
+) => TMethods | Promise<TMethods>
+
 /**
- * Exposes a set of methods as an RPC endpoint over the given messenger.
+ * Exposes methods as an RPC endpoint over the given messenger.
+ * Accepts a factory function that receives constructor args and returns methods.
  *
- * @param methods - An object containing functions to expose
+ * @param factory - A function that takes constructor args and returns methods (can be async)
  * @param options - Optional target Messenger and abort signal
+ *
+ * @example
+ * ```ts
+ * // Worker side
+ * expose(async (canvas: OffscreenCanvas, config: Config) => {
+ *   await initializeWasm()
+ *   const renderer = createRenderer(canvas, config)
+ *
+ *   return {
+ *     render: renderer.render,
+ *     resize: renderer.resize,
+ *   }
+ * })
+ * ```
  */
-export function expose<T extends object>(
-  methods: T,
+export function expose<TArgs extends any[], TMethods extends object>(
+  factory: MethodsFactory<TArgs, TMethods>,
   { to = self, signal }: { to?: Messenger; signal?: AbortSignal } = {},
-) {
-  createResponder(
-    to,
-    data => {
-      if (RPCPayloadShape.validate(data.payload)) {
+): void {
+  const postMessage = usePostMessage(to)
+  let methods: TMethods | null = null
+  let initPromise: Promise<TMethods> | null = null
+
+  to.addEventListener(
+    'message',
+    async event => {
+      const data = (event as MessageEvent).data
+
+      if (RequestShape.validate(data)) {
         try {
-          const { topics, args } = data.payload
-          return callMethod(methods, topics, args)
+          // Handle init request
+          if (InitPayloadShape.validate(data.payload)) {
+            const { args } = data.payload
+            // Call factory with constructor args
+            initPromise = Promise.resolve(factory(...(args as TArgs)))
+            methods = await initPromise
+            // Respond with success (no payload needed, just acknowledgment)
+            postMessage(ResponseShape.create(data, undefined), [])
+            return
+          }
+
+          // Handle RPC request
+          if (RPCPayloadShape.validate(data.payload)) {
+            // Wait for init if still in progress
+            if (initPromise && !methods) {
+              methods = await initPromise
+            }
+
+            if (!methods) {
+              throw new Error('RPC called before initialization')
+            }
+
+            const { topics, args } = data.payload
+            const result = await callMethod(methods, topics, args)
+            const { args: [processedResult], transferables } = extractTransferables([result])
+            postMessage(ResponseShape.create(data, processedResult), transferables)
+            return
+          }
         } catch (error) {
-          console.error('Error while processing rpc request:', error, data.payload, methods)
+          console.error('Error while processing rpc request:', error, data.payload)
+          postMessage(ErrorShape.create(data, error))
         }
       }
     },
     { signal },
   )
+
+  if ('start' in to) {
+    to.start?.()
+  }
 }
 
 /**
  * Creates an RPC proxy for calling remote methods on the given Messenger.
+ * Sends constructor args to the worker and waits for initialization.
  *
  * @param messenger - The Messenger to communicate with (e.g. Worker or Window)
+ * @param args - Constructor arguments to pass to the worker's factory function
  * @param options - Optional abort signal
- * @returns A proxy object that lets you call methods remotely
+ * @returns A promise that resolves to a proxy object for calling remote methods
  *
  * @example
  * ```ts
- * const worker = new Worker('worker.js')
- * const api = rpc<WorkerAPI>(worker)
+ * const api = await rpc<RendererAPI>(
+ *   new Worker('renderer.worker.js'),
+ *   [transfer(offscreenCanvas), { width: 1920, height: 1080 }]
+ * )
  *
- * // Call remote methods
- * await api.doSomething()
+ * // Worker is fully initialized, safe to call methods
+ * await api.render(frameData)
  *
  * // Access underlying messenger
  * api[$MESSENGER].terminate()
@@ -235,43 +297,58 @@ export function expose<T extends object>(
 // Overloads for specific messenger types to enable proper type inference
 export function rpc<T extends object>(
   messenger: Worker,
+  args?: any[],
   options?: { signal?: AbortSignal },
-): RPC<T> & { [$MESSENGER]: Worker }
+): Promise<RPC<T> & { [$MESSENGER]: Worker }>
 
 export function rpc<T extends object>(
   messenger: MessagePort,
+  args?: any[],
   options?: { signal?: AbortSignal },
-): RPC<T> & { [$MESSENGER]: MessagePort }
+): Promise<RPC<T> & { [$MESSENGER]: MessagePort }>
 
 export function rpc<T extends object>(
   messenger: Window,
+  args?: any[],
   options?: { signal?: AbortSignal },
-): RPC<T> & { [$MESSENGER]: Window }
+): Promise<RPC<T> & { [$MESSENGER]: Window }>
 
 export function rpc<T extends object>(
   messenger: BroadcastChannel,
+  args?: any[],
   options?: { signal?: AbortSignal },
-): RPC<T> & { [$MESSENGER]: BroadcastChannel }
+): Promise<RPC<T> & { [$MESSENGER]: BroadcastChannel }>
 
 export function rpc<T extends object>(
   messenger: ServiceWorker,
+  args?: any[],
   options?: { signal?: AbortSignal },
-): RPC<T> & { [$MESSENGER]: ServiceWorker }
+): Promise<RPC<T> & { [$MESSENGER]: ServiceWorker }>
 
 export function rpc<T extends object, M extends Messenger = Messenger>(
   messenger: M,
+  args?: any[],
   options?: { signal?: AbortSignal },
-): RPC<T> & { [$MESSENGER]: M }
+): Promise<RPC<T> & { [$MESSENGER]: M }>
 
 // Implementation
-export function rpc<T extends object, M extends Messenger>(
+export async function rpc<T extends object, M extends Messenger>(
   messenger: M,
+  args: any[] = [],
   options?: { signal?: AbortSignal },
-): RPC<T> & { [$MESSENGER]: M } {
+): Promise<RPC<T> & { [$MESSENGER]: M }> {
   const request = createRequester(messenger, options)
-  const proxy = createCommander<RPC<T>>((topics, args) => {
-    const { args: processedArgs, transferables } = extractTransferables(args)
-    return request(RPCPayloadShape.create(topics, processedArgs), transferables)
+
+  // Send init request with constructor args
+  const { args: processedArgs, transferables } = extractTransferables(args)
+  await request(InitPayloadShape.create(processedArgs), transferables)
+
+  // Create proxy for method calls
+  const proxy = createCommander<RPC<T>>((topics, methodArgs) => {
+    const { args: processedMethodArgs, transferables: methodTransferables } =
+      extractTransferables(methodArgs)
+    return request(RPCPayloadShape.create(topics, processedMethodArgs), methodTransferables)
   })
+
   return Object.assign(proxy, { [$MESSENGER]: messenger })
 }

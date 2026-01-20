@@ -55,3 +55,14 @@ export const RPCPayloadShape = createShape(
   }),
   (topics: Array<string>, args: Array<any>) => ({ [$MESSENGER_RPC_REQUEST]: true, topics, args }),
 )
+
+// Initialization request payload (for factory-based expose)
+export const $MESSENGER_INIT = 'RPC_PROXY_INIT'
+
+export const InitPayloadShape = createShape(
+  v.object({
+    [$MESSENGER_INIT]: v.boolean(),
+    args: v.array(v.any()),
+  }),
+  (args: Array<any>) => ({ [$MESSENGER_INIT]: true, args }),
+)
