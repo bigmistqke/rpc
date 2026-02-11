@@ -283,7 +283,7 @@ describe('expose', () => {
     await flushPromises()
 
     // Extract namespace ID from response
-    const initResponse = port.postMessage.mock.calls[0][0]
+    const initResponse = port.postMessage.mock.calls[0]![0]
     const namespaceId = initResponse.payload[$MESSENGER_HANDLE]
 
     // Now call method on the handle

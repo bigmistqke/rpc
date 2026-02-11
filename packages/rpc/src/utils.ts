@@ -58,28 +58,6 @@ export function defer<T = void>() {
   }
 }
 
-export function createCommander<T extends object = object>(
-  apply: (topics: Array<string>, args: Array<any>) => void,
-): T {
-  function _createCommander(
-    topics: Array<string>,
-    apply: (topics: Array<string>, args: Array<any>) => void,
-  ): T {
-    return new Proxy(function () {} as T, {
-      get(target, topic) {
-        if (typeof topic === 'symbol') return (target as any)[topic]
-        // Return undefined for 'then' so proxy isn't treated as thenable
-        if (topic === 'then') return undefined
-        return _createCommander([...topics, topic], apply)
-      },
-      apply(_, __, args) {
-        return apply(topics, args)
-      },
-    })
-  }
-  return _createCommander([], apply)
-}
-
 /**
  * Creates a schema-backed shape definition with a validator and constructor.
  *
@@ -94,18 +72,6 @@ export function createShape<
     validate: (value: any): value is InferOutput<TSchema> => safeParse(schema, value).success,
     create,
   }
-}
-
-// expose-core.ts
-export function callMethod(methods: object, topics: string[], args: unknown[]) {
-  const method = topics.reduce((acc, topic) => {
-    const result = (acc as any)?.[topic]
-    return result
-  }, methods)
-  if (typeof method !== 'function') {
-    throw new Error(`Topics did not resolve to a function: [${topics.join(',')}]`)
-  }
-  return method(...args)
 }
 
 // NOTE:  safari does not implement AsyncIterator for ReadableStream

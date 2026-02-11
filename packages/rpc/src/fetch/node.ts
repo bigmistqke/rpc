@@ -2,7 +2,7 @@
 
 import { IncomingMessage, ServerResponse } from 'http'
 import { Payload } from '.'
-import { callMethod } from '../utils'
+import { callMethod } from '../core'
 
 export function exposeNode<T extends object>(
   methods: T,

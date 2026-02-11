@@ -1,17 +1,15 @@
 import * as v from 'valibot'
-import { HANDLE_NAMESPACE_PREFIX, isHandleMarker, nextHandleNamespaceId } from '../handle'
+import { createExposeRequestHandler, createRpcCommander } from '../core'
 import {
   $MESSENGER_ERROR,
-  $MESSENGER_HANDLE,
   $MESSENGER_RESPONSE,
   ErrorShape,
-  HandleResponseShape,
   RequestShape,
   ResponseShape,
   RPCPayloadShape,
 } from '../protocol'
 import { RPC as BaseRPC } from '../types'
-import { callMethod, createCommander, createIdRegistry, createShape, defer } from '../utils'
+import { createIdRegistry, createShape, defer } from '../utils'
 export { handle, type Handled } from '../handle'
 
 export const $WEBSOCKET = Symbol.for('RPC-WEBSOCKET')
@@ -92,16 +90,7 @@ export function expose<TMethods extends object>(
   methods: TMethods,
   { to }: { to: WebSocketLike },
 ): void {
-  const namespaceHandlers = new Map<string, object>()
-
-  const processResult = (result: unknown): unknown => {
-    if (isHandleMarker(result)) {
-      const namespaceId = nextHandleNamespaceId()
-      namespaceHandlers.set(namespaceId, result.methods)
-      return HandleResponseShape.create(namespaceId)
-    }
-    return result
-  }
+  const handleRequest = createExposeRequestHandler(methods)
 
   to.addEventListener('message', async (event: unknown) => {
     if (!MessageEventShape.validate(event)) return
@@ -110,22 +99,8 @@ export function expose<TMethods extends object>(
       if (RequestShape.validate(data)) {
         try {
           if (RPCPayloadShape.validate(data.payload)) {
-            const { topics, args } = data.payload
-
-            const firstTopic = topics[0]
-            if (firstTopic && firstTopic.startsWith(HANDLE_NAMESPACE_PREFIX)) {
-              const handler = namespaceHandlers.get(firstTopic)
-              if (!handler) {
-                throw new Error(`Unknown namespace: ${firstTopic}`)
-              }
-              const result = await callMethod(handler, topics.slice(1), args)
-              to.send(JSON.stringify(ResponseShape.create(data, processResult(result))))
-              return
-            }
-
-            const result = await callMethod(methods, topics, args)
-            to.send(JSON.stringify(ResponseShape.create(data, processResult(result))))
-            return
+            const result = await handleRequest(data.payload.topics, data.payload.args)
+            to.send(JSON.stringify(ResponseShape.create(data, result)))
           }
         } catch (error) {
           console.error('Error while processing rpc request:', error, data.payload)
@@ -136,18 +111,6 @@ export function expose<TMethods extends object>(
       console.error(error)
     }
   })
-}
-
-/**
- * Check if a response payload is a handle response
- */
-function isHandleResponse(value: unknown): value is { [$MESSENGER_HANDLE]: string } {
-  return (
-    !!value &&
-    typeof value === 'object' &&
-    $MESSENGER_HANDLE in value &&
-    typeof (value as any)[$MESSENGER_HANDLE] === 'string'
-  )
 }
 
 /**
@@ -171,19 +134,9 @@ export function rpc<T extends object, WS extends WebSocketLike = WebSocketLike>(
 ): RPC<T, WS> {
   const request = createRequester(ws)
 
-  const createRpcCommander = <U extends object>(topicPrefix: string[] = []): BaseRPC<U> => {
-    return createCommander<BaseRPC<U>>((topics, methodArgs) => {
-      const fullTopics = [...topicPrefix, ...topics]
-      return request(RPCPayloadShape.create(fullTopics, methodArgs)).then((result: unknown) => {
-        if (isHandleResponse(result)) {
-          return createRpcCommander(result[$MESSENGER_HANDLE] ? [result[$MESSENGER_HANDLE]] : [])
-        }
-        return result
-      })
-    })
-  }
-
-  const proxy = createRpcCommander<T>()
+  const proxy = createRpcCommander<T>((topics, args) => {
+    return request(RPCPayloadShape.create(topics, args))
+  })
 
   return Object.assign(proxy, { [$WEBSOCKET]: ws }) as RPC<T, WS>
 }

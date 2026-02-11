@@ -1,13 +1,7 @@
 import { $MESSENGER_RESPONSE, RequestShape, ResponseShape, RPCPayloadShape } from '../protocol'
 import { RPC } from '../types'
-import {
-  callMethod,
-  createCommander,
-  createPromiseRegistry,
-  createReadableStream,
-  defer,
-  streamToAsyncIterable,
-} from '../utils'
+import { callMethod, createCommander } from '../core'
+import { createPromiseRegistry, createReadableStream, defer, streamToAsyncIterable } from '../utils'
 
 interface StreamCodec {
   serialize(value: any, onChunk: (chunk: any) => void): void

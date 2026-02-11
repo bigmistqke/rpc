@@ -1,7 +1,8 @@
 import * as v from 'valibot'
 import { $MESSENGER_REQUEST, RequestShape, RPCPayloadShape } from '../protocol'
 import { RPC } from '../types'
-import { callMethod, createCommander, createIdRegistry, createShape, defer } from '../utils'
+import { callMethod, createCommander } from '../core'
+import { createIdRegistry, createShape, defer } from '../utils'
 
 const $SSE_RESPONSE_HEADER = 'RPC_SSE_RESPONSE'
 

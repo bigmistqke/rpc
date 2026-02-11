@@ -1,17 +1,15 @@
-import { HANDLE_NAMESPACE_PREFIX, isHandleMarker, nextHandleNamespaceId } from '../handle'
+import { createExposeRequestHandler, createRpcCommander } from '../core'
 import {
   $MESSENGER_ERROR,
-  $MESSENGER_HANDLE,
   $MESSENGER_RESPONSE,
   ErrorShape,
-  HandleResponseShape,
   RequestData,
   RequestShape,
   ResponseShape,
   RPCPayloadShape,
 } from '../protocol'
 import type { RPC } from '../types'
-import { callMethod, createCommander, createIdRegistry, defer } from '../utils'
+import { createIdRegistry, defer } from '../utils'
 export { handle, type Handled } from '../handle'
 
 export const $TRANSFER = 'RPC-TRANSFER'
@@ -224,63 +222,21 @@ export function expose<TMethods extends object>(
   { to = self, signal }: { to?: Messenger; signal?: AbortSignal } = {},
 ): void {
   const postMessage = usePostMessage(to)
-
-  // Registry of namespaced handlers (for handle() sub-proxies)
-  const namespaceHandlers = new Map<string, object>()
-
-  /**
-   * Process a result value, registering handle markers as namespaces
-   */
-  const processResult = (result: unknown): unknown => {
-    if (isHandleMarker(result)) {
-      const namespaceId = nextHandleNamespaceId()
-      namespaceHandlers.set(namespaceId, result.methods)
-      return HandleResponseShape.create(namespaceId)
-    }
-    return result
-  }
+  const handleRequest = createExposeRequestHandler(methods)
 
   to.addEventListener(
     'message',
     async event => {
       const data = (event as MessageEvent).data
-
       if (RequestShape.validate(data)) {
         try {
-          // Handle RPC request
           if (RPCPayloadShape.validate(data.payload)) {
-            const { topics, args } = data.payload
-
-            // Check if this is a namespaced request (for handle() sub-proxies)
-            const firstTopic = topics[0]
-            if (firstTopic && firstTopic.startsWith(HANDLE_NAMESPACE_PREFIX)) {
-              const namespaceId = firstTopic
-              const handler = namespaceHandlers.get(namespaceId)
-
-              if (!handler) {
-                throw new Error(`Unknown namespace: ${namespaceId}`)
-              }
-
-              // Call method on the namespaced handler (skip namespace ID in topics)
-              const result = await callMethod(handler, topics.slice(1), args)
-              const processedResult = processResult(result)
-              const {
-                args: [finalResult],
-                transferables,
-              } = extractTransferables([processedResult])
-              postMessage(ResponseShape.create(data, finalResult), transferables)
-              return
-            }
-
-            // Regular method call on root methods
-            const result = await callMethod(methods, topics, args)
-            const processedResult = processResult(result)
+            const result = await handleRequest(data.payload.topics, data.payload.args)
             const {
               args: [finalResult],
               transferables,
-            } = extractTransferables([processedResult])
+            } = extractTransferables([result])
             postMessage(ResponseShape.create(data, finalResult), transferables)
-            return
           }
         } catch (error) {
           console.error('Error while processing rpc request:', error, data.payload)
@@ -294,18 +250,6 @@ export function expose<TMethods extends object>(
   if ('start' in to) {
     to.start?.()
   }
-}
-
-/**
- * Check if a response payload is a handle response
- */
-function isHandleResponse(value: unknown): value is { [$MESSENGER_HANDLE]: string } {
-  return (
-    !!value &&
-    typeof value === 'object' &&
-    $MESSENGER_HANDLE in value &&
-    typeof (value as any)[$MESSENGER_HANDLE] === 'string'
-  )
 }
 
 /**
@@ -366,28 +310,10 @@ export function rpc<T extends object, M extends Messenger>(
 ): RPC<T> & { [$MESSENGER]: M } {
   const request = createRequester(messenger, options)
 
-  /**
-   * Create a commander proxy that handles handle() responses
-   */
-  const createRpcCommander = <U extends object>(topicPrefix: string[] = []): RPC<U> => {
-    return createCommander<RPC<U>>((topics, methodArgs) => {
-      const { args: processedMethodArgs, transferables: methodTransferables } =
-        extractTransferables(methodArgs)
-      const fullTopics = [...topicPrefix, ...topics]
-      return request(
-        RPCPayloadShape.create(fullTopics, processedMethodArgs),
-        methodTransferables,
-      ).then((result: unknown) => {
-        // If result is a handle response, create a sub-proxy
-        if (isHandleResponse(result)) {
-          return createRpcCommander(result[$MESSENGER_HANDLE] ? [result[$MESSENGER_HANDLE]] : [])
-        }
-        return result
-      })
-    })
-  }
-
-  const proxy = createRpcCommander<T>()
+  const proxy = createRpcCommander<T>((topics, args) => {
+    const { args: processedArgs, transferables } = extractTransferables(args)
+    return request(RPCPayloadShape.create(topics, processedArgs), transferables)
+  })
 
   return Object.assign(proxy, { [$MESSENGER]: messenger })
 }

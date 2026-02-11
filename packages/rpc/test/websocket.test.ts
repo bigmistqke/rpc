@@ -171,7 +171,7 @@ describe('expose', () => {
 
     // payload is undefined which gets stripped by JSON.stringify
     // ResponseShape.validate should still pass with optional payload
-    const sent = JSON.parse(ws.send.mock.calls[0][0])
+    const sent = JSON.parse(ws.send.mock.calls[0]![0])
     expect(sent[$MESSENGER_RESPONSE]).toBe(1)
   })
 
@@ -199,7 +199,7 @@ describe('expose', () => {
 
     await flushPromises()
 
-    const sent = JSON.parse(ws.send.mock.calls[0][0])
+    const sent = JSON.parse(ws.send.mock.calls[0]![0])
     expect(sent[$MESSENGER_RESPONSE]).toBe(1)
     expect(sent.payload[$MESSENGER_HANDLE]).toContain('__rpc_handle_')
   })
@@ -231,7 +231,7 @@ describe('expose', () => {
     await flushPromises()
 
     // Extract namespace ID from response
-    const initResponse = JSON.parse(ws.send.mock.calls[0][0])
+    const initResponse = JSON.parse(ws.send.mock.calls[0]![0])
     const namespaceId = initResponse.payload[$MESSENGER_HANDLE]
 
     // Now call method on the handle
@@ -247,7 +247,7 @@ describe('expose', () => {
     await flushPromises()
 
     expect(getValue).toHaveBeenCalled()
-    const response = JSON.parse(ws.send.mock.calls[1][0])
+    const response = JSON.parse(ws.send.mock.calls[1]![0])
     expect(response).toEqual({
       [$MESSENGER_RESPONSE]: 2,
       payload: 42,
@@ -277,7 +277,7 @@ describe('expose', () => {
 
     await flushPromises()
 
-    const sent = JSON.parse(ws.send.mock.calls[0][0])
+    const sent = JSON.parse(ws.send.mock.calls[0]![0])
     expect(sent[$MESSENGER_ERROR]).toBe(1)
   })
 

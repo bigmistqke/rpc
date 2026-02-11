@@ -1,11 +1,10 @@
 import { describe, it, expect, vi } from 'vitest'
+import { callMethod, createCommander } from '../src/core'
 import {
   createIdAllocator,
   createIdRegistry,
   createPromiseRegistry,
   defer,
-  createCommander,
-  callMethod,
   createReadableStream,
   streamToAsyncIterable,
   createShape,

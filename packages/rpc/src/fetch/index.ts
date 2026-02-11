@@ -1,6 +1,7 @@
 import * as v from 'valibot'
 import { RPC } from '../types'
-import { callMethod, createCommander, createShape } from '../utils'
+import { callMethod, createCommander } from '../core'
+import { createShape } from '../utils'
 
 const $FETCH_HEADER = 'RPC_RR_PROXY'
 
