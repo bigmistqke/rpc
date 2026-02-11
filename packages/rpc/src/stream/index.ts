@@ -1,9 +1,4 @@
-import {
-  $MESSENGER_RESPONSE,
-  RequestShape,
-  ResponseShape,
-  RPCPayloadShape,
-} from '../protocol'
+import { $MESSENGER_RESPONSE, RequestShape, ResponseShape, RPCPayloadShape } from '../protocol'
 import { RPC } from '../types'
 import {
   callMethod,

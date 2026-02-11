@@ -506,10 +506,7 @@ describe('rpc', () => {
     expose({ echo: (msg: string) => msg }, { to: ws2 })
     const proxyA = rpc<{ ping: () => string }>(ws2)
 
-    const [pong, echoed] = await Promise.all([
-      proxyA.ping(),
-      proxyB.echo('hello'),
-    ])
+    const [pong, echoed] = await Promise.all([proxyA.ping(), proxyB.echo('hello')])
 
     expect(pong).toBe('pong')
     expect(echoed).toBe('hello')

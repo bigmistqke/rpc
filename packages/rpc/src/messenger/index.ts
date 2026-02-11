@@ -1,8 +1,4 @@
-import {
-  HANDLE_NAMESPACE_PREFIX,
-  isHandleMarker,
-  nextHandleNamespaceId
-} from '../handle'
+import { HANDLE_NAMESPACE_PREFIX, isHandleMarker, nextHandleNamespaceId } from '../handle'
 import {
   $MESSENGER_ERROR,
   $MESSENGER_HANDLE,
@@ -173,7 +169,10 @@ export function createResponder(
         try {
           const result = await callback(data)
           // Extract transferables from the result
-          const { args: [processedResult], transferables } = extractTransferables([result])
+          const {
+            args: [processedResult],
+            transferables,
+          } = extractTransferables([result])
           postMessage(ResponseShape.create(data, processedResult), transferables)
         } catch (error) {
           postMessage(ErrorShape.create(data, error))
@@ -265,7 +264,10 @@ export function expose<TMethods extends object>(
               // Call method on the namespaced handler (skip namespace ID in topics)
               const result = await callMethod(handler, topics.slice(1), args)
               const processedResult = processResult(result)
-              const { args: [finalResult], transferables } = extractTransferables([processedResult])
+              const {
+                args: [finalResult],
+                transferables,
+              } = extractTransferables([processedResult])
               postMessage(ResponseShape.create(data, finalResult), transferables)
               return
             }
@@ -273,7 +275,10 @@ export function expose<TMethods extends object>(
             // Regular method call on root methods
             const result = await callMethod(methods, topics, args)
             const processedResult = processResult(result)
-            const { args: [finalResult], transferables } = extractTransferables([processedResult])
+            const {
+              args: [finalResult],
+              transferables,
+            } = extractTransferables([processedResult])
             postMessage(ResponseShape.create(data, finalResult), transferables)
             return
           }
@@ -369,15 +374,16 @@ export function rpc<T extends object, M extends Messenger>(
       const { args: processedMethodArgs, transferables: methodTransferables } =
         extractTransferables(methodArgs)
       const fullTopics = [...topicPrefix, ...topics]
-      return request(RPCPayloadShape.create(fullTopics, processedMethodArgs), methodTransferables).then(
-        (result: unknown) => {
-          // If result is a handle response, create a sub-proxy
-          if (isHandleResponse(result)) {
-            return createRpcCommander(result[$MESSENGER_HANDLE] ? [result[$MESSENGER_HANDLE]] : [])
-          }
-          return result
-        },
-      )
+      return request(
+        RPCPayloadShape.create(fullTopics, processedMethodArgs),
+        methodTransferables,
+      ).then((result: unknown) => {
+        // If result is a handle response, create a sub-proxy
+        if (isHandleResponse(result)) {
+          return createRpcCommander(result[$MESSENGER_HANDLE] ? [result[$MESSENGER_HANDLE]] : [])
+        }
+        return result
+      })
     })
   }
 

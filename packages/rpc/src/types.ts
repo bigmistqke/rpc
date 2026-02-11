@@ -2,7 +2,9 @@ export type Fn = (...arg: Array<any>) => any
 export type MaybePromise<T> = T | Promise<T>
 
 /** Check if T is a Handled type and extract the inner type */
-type UnwrapHandled<T> = T extends { readonly ['__rpc_handled__']: infer U extends object } ? RPC<U> : T
+type UnwrapHandled<T> = T extends { readonly ['__rpc_handled__']: infer U extends object }
+  ? RPC<U>
+  : T
 
 // To prevent error: `Type instantiation is excessively deep and possibly infinite.`
 type isObject<T> = T extends object ? true : false

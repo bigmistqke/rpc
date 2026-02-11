@@ -79,10 +79,7 @@ describe('rpc', () => {
     }
 
     // Set up endpoint 1 - reads from stream1, writes to its output stream
-    const endpoint1 = rpc<{ echo: (msg: string) => string }, typeof methods1>(
-      stream1,
-      methods1,
-    )
+    const endpoint1 = rpc<{ echo: (msg: string) => string }, typeof methods1>(stream1, methods1)
 
     // Set up endpoint 2 - reads from stream2, writes to its output stream
     const endpoint2 = rpc<{ ping: () => string }, typeof methods2>(stream2, methods2)
@@ -233,7 +230,6 @@ describe('rpc', () => {
         enqueue2(decoder.decode(value))
       }
     })()
-
     ;(async () => {
       while (true) {
         const { done, value } = await reader2.read()
