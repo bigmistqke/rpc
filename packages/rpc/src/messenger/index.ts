@@ -1,4 +1,9 @@
 import {
+  HANDLE_NAMESPACE_PREFIX,
+  isHandleMarker,
+  nextHandleNamespaceId
+} from '../handle'
+import {
   $MESSENGER_ERROR,
   $MESSENGER_HANDLE,
   $MESSENGER_RESPONSE,
@@ -8,13 +13,13 @@ import {
   RequestShape,
   ResponseShape,
   RPCPayloadShape,
-} from './message-protocol'
-import { RPC } from './types'
-export type { RPC } from './types'
-import { callMethod, createCommander, createIdRegistry, defer } from './utils'
+} from '../protocol'
+import type { RPC } from '../types'
+import { callMethod, createCommander, createIdRegistry, defer } from '../utils'
+export { handle, type Handled } from '../handle'
 
 export const $TRANSFER = 'RPC-TRANSFER'
-export const $MESSENGER = Symbol('RPC-MESSENGER')
+export const $MESSENGER = Symbol.for('RPC-MESSENGER')
 
 /** Wrapper type for transferable values */
 export type Transferred<T> = T & {
@@ -34,51 +39,6 @@ export function transfer<T extends object>(value: T): Transferred<T> {
  */
 function isTransferred(value: unknown): value is Transferred<unknown> {
   return !!value && typeof value === 'object' && $TRANSFER in value
-}
-
-/**********************************************************************************/
-/*                                                                                */
-/*                                     Handle                                     */
-/*                                                                                */
-/**********************************************************************************/
-
-const $HANDLE_MARKER = Symbol('RPC-HANDLE-MARKER')
-
-/** Internal marker type for handle() */
-interface HandleMarker<T extends object> {
-  [$HANDLE_MARKER]: true
-  methods: T
-}
-
-/** Type for values returned by handle() - unwrapped to RPC<T> by RPC system */
-export type Handled<T extends object> = T & { readonly ['__rpc_handled__']: T }
-
-/**
- * Mark methods to be returned as a sub-proxy from an RPC method.
- * Use this when a method needs to return an object with callable methods.
- *
- * @example
- * ```ts
- * expose({
- *   init(canvas: OffscreenCanvas) {
- *     const renderer = createRenderer(canvas)
- *     return handle({
- *       render: () => renderer.render(),
- *       resize: (w, h) => renderer.resize(w, h),
- *     })
- *   }
- * })
- * ```
- */
-export function handle<T extends object>(methods: T): Handled<T> {
-  return { [$HANDLE_MARKER]: true, methods } as unknown as Handled<T>
-}
-
-/**
- * Check if a value is a handle marker
- */
-function isHandleMarker<T extends object>(value: unknown): value is HandleMarker<T> {
-  return !!value && typeof value === 'object' && $HANDLE_MARKER in value
 }
 
 /**
@@ -234,12 +194,6 @@ export function createResponder(
 /*                                                                                */
 /**********************************************************************************/
 
-// Prefix for namespace IDs to avoid collisions
-const HANDLE_NAMESPACE_PREFIX = '__rpc_handle_'
-
-// Counter for generating unique namespace IDs
-let handleNamespaceCounter = 0
-
 /**
  * Exposes methods as an RPC endpoint over the given messenger.
  *
@@ -280,7 +234,7 @@ export function expose<TMethods extends object>(
    */
   const processResult = (result: unknown): unknown => {
     if (isHandleMarker(result)) {
-      const namespaceId = `${HANDLE_NAMESPACE_PREFIX}${handleNamespaceCounter++}`
+      const namespaceId = nextHandleNamespaceId()
       namespaceHandlers.set(namespaceId, result.methods)
       return HandleResponseShape.create(namespaceId)
     }

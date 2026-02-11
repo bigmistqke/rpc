@@ -1,6 +1,6 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { expose, rpc, isSSEResponse, Payload } from '../src/server-send-events/index'
-import { $MESSENGER_REQUEST, $MESSENGER_RPC_REQUEST } from '../src/message-protocol'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { $MESSENGER_REQUEST, $MESSENGER_RPC_REQUEST } from '../src/protocol'
+import { expose, isSSEResponse, Payload, rpc } from '../src/server-send-events/index'
 
 // Mock EventSource
 class MockEventSource {

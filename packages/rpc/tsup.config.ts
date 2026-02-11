@@ -2,7 +2,8 @@ import { defineConfig } from 'tsup'
 
 export default defineConfig({
   entry: {
-    messenger: 'src/messenger.ts',
+    messenger: 'src/messenger/index.ts',
+    websocket: 'src/websocket/index.ts',
     stream: 'src/stream/index.ts',
     fetch: 'src/fetch/index.ts',
     'fetch-node': 'src/fetch/node.ts',

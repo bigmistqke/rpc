@@ -1,5 +1,5 @@
-import { $MESSENGER_REQUEST, RequestShape, RPCPayloadShape } from '../message-protocol'
 import * as v from 'valibot'
+import { $MESSENGER_REQUEST, RequestShape, RPCPayloadShape } from '../protocol'
 import { RPC } from '../types'
 import { callMethod, createCommander, createIdRegistry, createShape, defer } from '../utils'
 

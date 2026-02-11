@@ -10,6 +10,10 @@
       "import": "./dist/messenger.js",
       "types": "./dist/messenger.d.ts"
     },
+    "./websocket": {
+      "import": "./dist/websocket.js",
+      "types": "./dist/websocket.d.ts"
+    },
     "./stream": {
       "import": "./dist/stream.js",
       "types": "./dist/stream.d.ts"

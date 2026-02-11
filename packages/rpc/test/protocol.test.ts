@@ -1,14 +1,14 @@
-import { describe, it, expect } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import {
-  RequestShape,
-  ResponseShape,
-  ErrorShape,
-  RPCPayloadShape,
+  $MESSENGER_ERROR,
   $MESSENGER_REQUEST,
   $MESSENGER_RESPONSE,
-  $MESSENGER_ERROR,
   $MESSENGER_RPC_REQUEST,
-} from '../src/message-protocol'
+  ErrorShape,
+  RequestShape,
+  ResponseShape,
+  RPCPayloadShape,
+} from '../src/protocol'
 
 describe('RequestShape', () => {
   describe('validate', () => {

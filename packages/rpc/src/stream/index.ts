@@ -3,7 +3,7 @@ import {
   RequestShape,
   ResponseShape,
   RPCPayloadShape,
-} from '../message-protocol'
+} from '../protocol'
 import { RPC } from '../types'
 import {
   callMethod,

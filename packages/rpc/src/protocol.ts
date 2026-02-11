@@ -22,7 +22,7 @@ export const $MESSENGER_RESPONSE = 'RPC_PROXY_RESPONSE'
 export const ResponseShape = createShape(
   v.object({
     [$MESSENGER_RESPONSE]: v.number(),
-    payload: v.unknown(),
+    payload: v.optional(v.unknown()),
   }),
   (request: RequestData, payload: any) => ({
     [$MESSENGER_RESPONSE]: request[$MESSENGER_REQUEST],

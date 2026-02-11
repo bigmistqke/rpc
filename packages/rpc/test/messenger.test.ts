@@ -1,12 +1,12 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { expose, rpc, createResponder, handle } from '../src/messenger'
+import { describe, expect, it, vi } from 'vitest'
+import { createResponder, expose, handle, rpc } from '../src/messenger'
 import {
+  $MESSENGER_ERROR,
+  $MESSENGER_HANDLE,
   $MESSENGER_REQUEST,
   $MESSENGER_RESPONSE,
-  $MESSENGER_ERROR,
   $MESSENGER_RPC_REQUEST,
-  $MESSENGER_HANDLE,
-} from '../src/message-protocol'
+} from '../src/protocol'
 
 // Helper to flush pending promises
 const flushPromises = () => new Promise(resolve => setTimeout(resolve, 0))
