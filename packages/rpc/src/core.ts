@@ -9,7 +9,7 @@ export function createCommander<T extends object = object>(
     topics: Array<string>,
     apply: (topics: Array<string>, args: Array<any>) => void,
   ): T {
-    return new Proxy(function () {} as T, {
+    return new Proxy(function () { } as T, {
       get(target, topic) {
         if (typeof topic === 'symbol') return (target as any)[topic]
         // Return undefined for 'then' so proxy isn't treated as thenable
@@ -32,7 +32,7 @@ export function callMethod(methods: object, topics: string[], args: unknown[]) {
   if (typeof method !== 'function') {
     throw new Error(`Topics did not resolve to a function: [${topics.join(',')}]`)
   }
-  return method(...args)
+  return method.call(methods, ...args)
 }
 
 /**
