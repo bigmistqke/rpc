@@ -10,7 +10,9 @@ import {
 } from '../protocol'
 import type { RPC } from '../types'
 import { createIdRegistry, defer } from '../utils'
+
 export { handle, type Handled } from '../handle'
+export type { RPC } from '../types'
 
 export const $TRANSFER = 'RPC-TRANSFER'
 export const $MESSENGER = Symbol.for('RPC-MESSENGER')
